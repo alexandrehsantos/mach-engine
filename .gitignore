@@ -1,36 +1,24 @@
-# Binaries and objects
+# Binaries and packages
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
+*.tar.gz
+*.zip
+*.rar
+
+# Go specific
 *.test
 *.out
+/vendor/
 
-# IDE specific files
+# IDE
 .idea/
 .vscode/
 *.swp
 *.swo
+
+# OS specific
 .DS_Store
-
-# Environment variables
-.env
-.env.local
-
-# Build directory
-bin/
-dist/
-
-# Dependency directories
-vendor/
-
-# Log files
-*.log
-
-# Coverage reports
-coverage.txt
-coverage.html
-
-# Debug files
-debug
+Thumbs.db
