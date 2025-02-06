@@ -1,0 +1,36 @@
+# Binaries and objects
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Environment variables
+.env
+.env.local
+
+# Build directory
+bin/
+dist/
+
+# Dependency directories
+vendor/
+
+# Log files
+*.log
+
+# Coverage reports
+coverage.txt
+coverage.html
+
+# Debug files
+debug
