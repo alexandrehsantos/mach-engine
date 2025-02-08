@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -10,10 +9,20 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/joho/godotenv"
+
+	httphandler "company.com/matchengine/internal/handler/http"
 	"company.com/matchengine/internal/middleware"
+	"company.com/matchengine/internal/service/matching"
 )
 
 func main() {
+	// Load .env file
+	if err := godotenv.Load(); err != nil {
+		slog.Error("Error loading .env file", "error", err)
+		os.Exit(1)
+	}
+
 	// Initialize logger
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
@@ -23,12 +32,17 @@ func main() {
 	// Initialize server
 	mux := http.NewServeMux()
 
-	// Add a simple health check endpoint
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, `{"status":"ok","timestamp":"%s"}`, time.Now().Format(time.RFC3339))
-	})
+	// Initialize services
+	matchingService := matching.NewService()
+
+	// Initialize handlers
+	orderHandler := httphandler.NewOrderHandler(matchingService)
+
+	// Add routes
+	mux.HandleFunc("POST /api/v1/orders", orderHandler.CreateOrder)
+
+	// Health check endpoint
+	mux.HandleFunc("GET /health", httphandler.HealthCheck)
 
 	// Add middleware
 	handler := middleware.Chain(
@@ -39,7 +53,7 @@ func main() {
 
 	// Configure server
 	server := &http.Server{
-		Addr:         ":8080", // Hardcoded for testing
+		Addr:         ":8080",
 		Handler:      handler,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
@@ -78,26 +92,11 @@ func main() {
 
 	// Start server
 	logger.Info("Starting server...", "port", "8080")
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	if err := server.ListenAndServe(); err != http.ErrServerClosed {
 		logger.Error("server error", "error", err)
 		os.Exit(1)
 	}
 
 	// Wait for server context to be stopped
 	<-serverCtx.Done()
-}
-
-func getLogLevel(level string) slog.Level {
-	switch level {
-	case "debug":
-		return slog.LevelDebug
-	case "info":
-		return slog.LevelInfo
-	case "warn":
-		return slog.LevelWarn
-	case "error":
-		return slog.LevelError
-	default:
-		return slog.LevelInfo
-	}
 }

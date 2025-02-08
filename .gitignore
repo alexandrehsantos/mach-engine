@@ -22,3 +22,5 @@
 # OS specific
 .DS_Store
 Thumbs.db
+# Binary output directory
+/bin/
