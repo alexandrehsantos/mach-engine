@@ -40,6 +40,9 @@ func (ob *OrderBook) AddOrder(o *order.Order) error {
 	ob.mutex.Lock()
 	defer ob.mutex.Unlock()
 
+	// Adiciona a ordem ao mapa primeiro
+	ob.orders[o.ID] = o
+
 	// Try to match the order first
 	if err := ob.tryMatch(o); err != nil {
 		return err
@@ -53,11 +56,10 @@ func (ob *OrderBook) AddOrder(o *order.Order) error {
 		case order.SideSell:
 			ob.addSellOrder(o)
 		}
-		ob.orders[o.ID] = o
 	}
 
-	// Process the match after adding the order
-	ob.match()
+	// Limpa níveis vazios após o matching
+	ob.cleanupEmptyLevels()
 
 	return nil
 }
@@ -197,28 +199,12 @@ func (ob *OrderBook) GetOrder(orderID string) (*order.Order, error) {
 	ob.mutex.RLock()
 	defer ob.mutex.RUnlock()
 
-	// Procura nas ordens de compra
-	if order := ob.findOrder(ob.buyLevels, orderID); order != nil {
-		return order, nil
+	o, exists := ob.orders[orderID]
+	if !exists {
+		return nil, fmt.Errorf("order not found: %s", orderID)
 	}
 
-	// Procura nas ordens de venda
-	if order := ob.findOrder(ob.sellLevels, orderID); order != nil {
-		return order, nil
-	}
-
-	return nil, fmt.Errorf("order not found: %s", orderID)
-}
-
-func (ob *OrderBook) findOrder(level *PriceLevel, orderID string) *order.Order {
-	for ; level != nil; level = level.Next {
-		for _, o := range level.Orders {
-			if o.ID == orderID {
-				return o
-			}
-		}
-	}
-	return nil
+	return o, nil
 }
 
 // CancelOrder cancela uma ordem existente
@@ -231,12 +217,53 @@ func (ob *OrderBook) CancelOrder(orderID string) error {
 		return fmt.Errorf("order not found: %s", orderID)
 	}
 
-	if err := o.Cancel(); err != nil {
-		return err
+	// Marca a ordem como cancelada
+	o.Status = order.StatusCancelled
+
+	// Remove a ordem do nível de preço
+	switch o.Side {
+	case order.SideBuy:
+		ob.removeBuyOrder(o)
+	case order.SideSell:
+		ob.removeSellOrder(o)
 	}
 
-	delete(ob.orders, orderID)
+	// Limpa níveis vazios após a remoção
+	ob.cleanupEmptyLevels()
+
 	return nil
+}
+
+func (ob *OrderBook) removeBuyOrder(o *order.Order) {
+	current := ob.buyLevels
+	for current != nil {
+		if current.Price == o.Price {
+			for i, order := range current.Orders {
+				if order.ID == o.ID {
+					current.Orders = append(current.Orders[:i], current.Orders[i+1:]...)
+					break
+				}
+			}
+			break
+		}
+		current = current.Next
+	}
+}
+
+func (ob *OrderBook) removeSellOrder(o *order.Order) {
+	current := ob.sellLevels
+	for current != nil {
+		if current.Price == o.Price {
+			for i, order := range current.Orders {
+				if order.ID == o.ID {
+					current.Orders = append(current.Orders[:i], current.Orders[i+1:]...)
+					break
+				}
+			}
+			break
+		}
+		current = current.Next
+	}
 }
 
 // GetOrderBook retorna um snapshot do order book
@@ -300,52 +327,68 @@ func (ob *OrderBook) GetBestAsk() (price, quantity float64, err error) {
 }
 
 func (ob *OrderBook) tryMatch(o *order.Order) error {
-	var matchingLevels *PriceLevel
-	var isAggressive bool
-
 	switch o.Side {
 	case order.SideBuy:
-		matchingLevels = ob.sellLevels
-		isAggressive = true
-	case order.SideSell:
-		matchingLevels = ob.buyLevels
-		isAggressive = false
-	}
-
-	for matchingLevels != nil && o.Status != order.StatusFilled {
-		if (isAggressive && o.Price < matchingLevels.Price) ||
-			(!isAggressive && o.Price > matchingLevels.Price) {
-			break
-		}
-
-		for _, restingOrder := range matchingLevels.Orders {
-			if restingOrder.Status == order.StatusCancelled {
-				continue
-			}
-
-			matchQty := min(o.RemainingQuantity(), restingOrder.RemainingQuantity())
-			if matchQty <= 0 {
-				continue
-			}
-
-			// Execute the match
-			if err := o.Fill(matchQty); err != nil {
-				return err
-			}
-			if err := restingOrder.Fill(matchQty); err != nil {
-				return err
-			}
-
-			if restingOrder.Status == order.StatusFilled {
-				delete(ob.orders, restingOrder.ID)
-			}
-
-			if o.Status == order.StatusFilled {
+		// Se é uma ordem de compra, procura ordens de venda compatíveis
+		for ob.sellLevels != nil && o.RemainingQuantity() > 0 {
+			sellLevel := ob.sellLevels
+			if sellLevel.Price > o.Price {
+				// Não há mais ordens compatíveis
 				break
 			}
+
+			// Processa ordens neste nível de preço
+			for i := 0; i < len(sellLevel.Orders) && o.RemainingQuantity() > 0; i++ {
+				sellOrder := sellLevel.Orders[i]
+				matchQty := min(o.RemainingQuantity(), sellOrder.RemainingQuantity())
+
+				// Executa o match
+				o.Fill(matchQty)
+				sellOrder.Fill(matchQty)
+
+				// Se a ordem de venda foi totalmente preenchida, remove do nível
+				if sellOrder.Status == order.StatusFilled {
+					sellLevel.Orders = append(sellLevel.Orders[:i], sellLevel.Orders[i+1:]...)
+					i--
+				}
+			}
+
+			// Se o nível está vazio, remove-o
+			if len(sellLevel.Orders) == 0 {
+				ob.sellLevels = ob.sellLevels.Next
+			}
 		}
 
-		matchingLevels = matchingLevels.Next
+	case order.SideSell:
+		// Se é uma ordem de venda, procura ordens de compra compatíveis
+		for ob.buyLevels != nil && o.RemainingQuantity() > 0 {
+			buyLevel := ob.buyLevels
+			if buyLevel.Price < o.Price {
+				// Não há mais ordens compatíveis
+				break
+			}
+
+			// Processa ordens neste nível de preço
+			for i := 0; i < len(buyLevel.Orders) && o.RemainingQuantity() > 0; i++ {
+				buyOrder := buyLevel.Orders[i]
+				matchQty := min(o.RemainingQuantity(), buyOrder.RemainingQuantity())
+
+				// Executa o match
+				o.Fill(matchQty)
+				buyOrder.Fill(matchQty)
+
+				// Se a ordem de compra foi totalmente preenchida, remove do nível
+				if buyOrder.Status == order.StatusFilled {
+					buyLevel.Orders = append(buyLevel.Orders[:i], buyLevel.Orders[i+1:]...)
+					i--
+				}
+			}
+
+			// Se o nível está vazio, remove-o
+			if len(buyLevel.Orders) == 0 {
+				ob.buyLevels = ob.buyLevels.Next
+			}
+		}
 	}
 
 	return nil

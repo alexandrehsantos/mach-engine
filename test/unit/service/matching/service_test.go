@@ -1,11 +1,13 @@
-package matching
+package matching_test
 
 import (
 	"testing"
 
-	"company.com/matchengine/internal/domain/order"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"company.com/matchengine/internal/domain/order"
+	"company.com/matchengine/internal/service/matching"
 )
 
 // TestOrder represents test order data
@@ -51,7 +53,7 @@ func TestMatchingService(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Setup
-			service := NewService()
+			service := matching.NewService()
 
 			// Create orders
 			buyOrder, err := createTestOrder(tc.buyOrder)
@@ -86,7 +88,7 @@ func TestMatchingService(t *testing.T) {
 
 func TestOrderCancellation(t *testing.T) {
 	// Setup
-	service := NewService()
+	service := matching.NewService()
 	orderData := TestOrder{
 		side:     order.SideBuy,
 		symbol:   "BTC-USD",
@@ -117,12 +119,12 @@ func TestOrderCancellation(t *testing.T) {
 func TestErrorCases(t *testing.T) {
 	testCases := []struct {
 		name        string
-		testFunc    func(*Service) error
+		testFunc    func(*matching.Service) error
 		expectedErr bool
 	}{
 		{
 			name: "invalid symbol orderbook",
-			testFunc: func(s *Service) error {
+			testFunc: func(s *matching.Service) error {
 				_, err := s.GetOrderBook("INVALID-PAIR")
 				return err
 			},
@@ -130,14 +132,14 @@ func TestErrorCases(t *testing.T) {
 		},
 		{
 			name: "cancel order with invalid symbol",
-			testFunc: func(s *Service) error {
+			testFunc: func(s *matching.Service) error {
 				return s.CancelOrder("INVALID-PAIR", "some-id")
 			},
 			expectedErr: true,
 		},
 		{
 			name: "cancel non-existent order",
-			testFunc: func(s *Service) error {
+			testFunc: func(s *matching.Service) error {
 				return s.CancelOrder("BTC-USD", "non-existent-id")
 			},
 			expectedErr: true,
@@ -146,7 +148,7 @@ func TestErrorCases(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			service := NewService()
+			service := matching.NewService()
 			err := tc.testFunc(service)
 			assert.Equal(t, tc.expectedErr, err != nil)
 		})
@@ -155,7 +157,7 @@ func TestErrorCases(t *testing.T) {
 
 func TestMatchingService_ErrorCases(t *testing.T) {
 	t.Run("invalid symbol", func(t *testing.T) {
-		service := NewService()
+		service := matching.NewService()
 
 		// Try to get non-existent order book
 		_, err := service.GetOrderBook("INVALID-PAIR")
@@ -171,7 +173,7 @@ func TestMatchingService_ErrorCases(t *testing.T) {
 	})
 
 	t.Run("invalid order cancellation", func(t *testing.T) {
-		service := NewService()
+		service := matching.NewService()
 
 		// Try to cancel non-existent order
 		err := service.CancelOrder("BTC-USD", "non-existent-id")
@@ -182,7 +184,7 @@ func TestMatchingService_ErrorCases(t *testing.T) {
 }
 
 func TestMatchingServiceErrors(t *testing.T) {
-	service := NewService()
+	service := matching.NewService()
 
 	// Test canceling non-existent order
 	err := service.CancelOrder("BTC-USD", "invalid-id")
@@ -198,7 +200,7 @@ func TestMatchingServiceErrors(t *testing.T) {
 }
 
 func TestOrderMatching(t *testing.T) {
-	service := NewService()
+	service := matching.NewService()
 
 	// Create buy order using helper function
 	buyOrder, err := createTestOrder(TestOrder{
@@ -207,15 +209,11 @@ func TestOrderMatching(t *testing.T) {
 		price:    50000.0,
 		quantity: 1.0,
 	})
-	if err != nil {
-		t.Fatalf("Failed to create buy order: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Adicionar ordem de compra
 	err = service.AddOrder(buyOrder)
-	if err != nil {
-		t.Fatalf("Failed to add buy order: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Create sell order using helper function
 	sellOrder, err := createTestOrder(TestOrder{
@@ -224,31 +222,23 @@ func TestOrderMatching(t *testing.T) {
 		price:    50000.0,
 		quantity: 1.0,
 	})
-	if err != nil {
-		t.Fatalf("Failed to create sell order: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Adicionar ordem de venda
 	err = service.AddOrder(sellOrder)
-	if err != nil {
-		t.Fatalf("Failed to add sell order: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Verificar status das ordens após matching
-	if buyOrder.Status != order.StatusPartial {
-		t.Errorf("Expected buy order status to be %v, got %v", order.StatusPartial, buyOrder.Status)
-	}
-
-	if sellOrder.Status != order.StatusFilled {
-		t.Errorf("Expected sell order status to be %v, got %v", order.StatusFilled, sellOrder.Status)
-	}
+	require.Equal(t, order.StatusFilled, buyOrder.Status)
+	require.Equal(t, order.StatusFilled, sellOrder.Status)
 
 	// Verificar quantidades preenchidas
-	if buyOrder.Filled != 1.0 {
-		t.Errorf("Expected buy order filled quantity to be 1.0, got %v", buyOrder.Filled)
-	}
+	require.Equal(t, 1.0, buyOrder.Filled)
+	require.Equal(t, 1.0, sellOrder.Filled)
 
-	if sellOrder.Filled != 1.0 {
-		t.Errorf("Expected sell order filled quantity to be 1.0, got %v", sellOrder.Filled)
-	}
+	// Verificar se o order book está vazio após o matching completo
+	book, err := service.GetOrderBook("BTC-USD")
+	require.NoError(t, err)
+	assert.Empty(t, book.Bids)
+	assert.Empty(t, book.Asks)
 }
