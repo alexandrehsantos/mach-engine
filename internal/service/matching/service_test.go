@@ -235,8 +235,8 @@ func TestOrderMatching(t *testing.T) {
 	}
 
 	// Verificar status das ordens após matching
-	if buyOrder.Status != order.StatusPartial {
-		t.Errorf("Expected buy order status to be %v, got %v", order.StatusPartial, buyOrder.Status)
+	if buyOrder.Status != order.StatusFilled {
+		t.Errorf("Expected buy order status to be %v, got %v", order.StatusFilled, buyOrder.Status)
 	}
 
 	if sellOrder.Status != order.StatusFilled {

@@ -148,14 +148,23 @@ func (ob *OrderBook) match() {
 func (ob *OrderBook) processLevelMatch(buyLevel, sellLevel *PriceLevel) {
 	for len(buyLevel.Orders) > 0 && len(sellLevel.Orders) > 0 {
 		buy := buyLevel.Orders[0]
+		if buy.Status == order.StatusCancelled {
+			buyLevel.Orders = buyLevel.Orders[1:]
+			continue
+		}
+
 		sell := sellLevel.Orders[0]
+		if sell.Status == order.StatusCancelled {
+			sellLevel.Orders = sellLevel.Orders[1:]
+			continue
+		}
 
 		// Calculate match quantity
 		matchQty := min(buy.RemainingQuantity(), sell.RemainingQuantity())
 
-		// Execute the match
-		buy.Fill(matchQty)
-		sell.Fill(matchQty)
+		// Execute the match (errors are ignored as quantities are validated)
+		_ = buy.Fill(matchQty)
+		_ = sell.Fill(matchQty)
 
 		// Remove filled orders
 		if buy.Status == order.StatusFilled {
@@ -235,8 +244,33 @@ func (ob *OrderBook) CancelOrder(orderID string) error {
 		return err
 	}
 
+	// Remove the order from its price level so it doesn't
+	// interfere with future matching operations.
+	switch o.Side {
+	case order.SideBuy:
+		ob.removeOrderFromLevels(&ob.buyLevels, orderID)
+	case order.SideSell:
+		ob.removeOrderFromLevels(&ob.sellLevels, orderID)
+	}
+
 	delete(ob.orders, orderID)
 	return nil
+}
+
+// removeOrderFromLevels removes an order by ID from the given price levels list.
+func (ob *OrderBook) removeOrderFromLevels(head **PriceLevel, orderID string) {
+	for level := *head; level != nil; level = level.Next {
+		for i, ord := range level.Orders {
+			if ord.ID == orderID {
+				level.Orders = append(level.Orders[:i], level.Orders[i+1:]...)
+				// If we removed the last order from this level, clean up empty levels
+				if len(level.Orders) == 0 {
+					ob.cleanupEmptyLevels()
+				}
+				return
+			}
+		}
+	}
 }
 
 // GetOrderBook retorna um snapshot do order book

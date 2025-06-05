@@ -6,6 +6,14 @@ import (
 	"company.com/matchengine/internal/domain/order"
 )
 
+func mustNewOrder(t *testing.T, side order.Side, symbol string, price, qty float64) *order.Order {
+	o, err := order.NewOrder(side, symbol, price, qty)
+	if err != nil {
+		t.Fatalf("failed to create order: %v", err)
+	}
+	return o
+}
+
 func TestOrderBook_AddOrder(t *testing.T) {
 	ob := NewOrderBook("BTC-USD")
 
@@ -15,33 +23,18 @@ func TestOrderBook_AddOrder(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "valid buy order",
-			order: order.NewOrder(
-				order.Buy,
-				"BTC-USD",
-				50000.0,
-				1.0,
-			),
+			name:    "valid buy order",
+			order:   mustNewOrder(t, order.SideBuy, "BTC-USD", 50000.0, 1.0),
 			wantErr: false,
 		},
 		{
-			name: "valid sell order",
-			order: order.NewOrder(
-				order.Sell,
-				"BTC-USD",
-				50100.0,
-				1.0,
-			),
+			name:    "valid sell order",
+			order:   mustNewOrder(t, order.SideSell, "BTC-USD", 50100.0, 1.0),
 			wantErr: false,
 		},
 		{
-			name: "invalid symbol",
-			order: order.NewOrder(
-				order.Buy,
-				"ETH-USD",
-				50000.0,
-				1.0,
-			),
+			name:    "invalid symbol",
+			order:   mustNewOrder(t, order.SideBuy, "ETH-USD", 50000.0, 1.0),
 			wantErr: true,
 		},
 	}
@@ -60,29 +53,19 @@ func TestOrderBook_Match(t *testing.T) {
 	ob := NewOrderBook("BTC-USD")
 
 	// Adiciona ordem de compra
-	buyOrder := order.NewOrder(
-		order.Buy,
-		"BTC-USD",
-		50000.0,
-		2.0,
-	)
+	buyOrder := mustNewOrder(t, order.SideBuy, "BTC-USD", 50000.0, 2.0)
 	ob.AddOrder(buyOrder)
 
 	// Adiciona ordem de venda que deve casar parcialmente
-	sellOrder := order.NewOrder(
-		order.Sell,
-		"BTC-USD",
-		50000.0,
-		1.0,
-	)
+	sellOrder := mustNewOrder(t, order.SideSell, "BTC-USD", 50000.0, 1.0)
 	ob.AddOrder(sellOrder)
 
 	// Verifica se o matching ocorreu corretamente
-	if buyOrder.Status != order.Partial {
-		t.Errorf("expected buy order status to be %v, got %v", order.Partial, buyOrder.Status)
+	if buyOrder.Status != order.StatusPartial {
+		t.Errorf("expected buy order status to be %v, got %v", order.StatusPartial, buyOrder.Status)
 	}
-	if sellOrder.Status != order.Filled {
-		t.Errorf("expected sell order status to be %v, got %v", order.Filled, sellOrder.Status)
+	if sellOrder.Status != order.StatusFilled {
+		t.Errorf("expected sell order status to be %v, got %v", order.StatusFilled, sellOrder.Status)
 	}
 	if buyOrder.Filled != 1.0 {
 		t.Errorf("expected buy order filled quantity to be 1.0, got %v", buyOrder.Filled)
@@ -96,23 +79,18 @@ func TestOrderBook_CancelOrder(t *testing.T) {
 	ob := NewOrderBook("BTC-USD")
 
 	// Adiciona ordem de compra
-	order := order.NewOrder(
-		order.Buy,
-		"BTC-USD",
-		50000.0,
-		1.0,
-	)
-	ob.AddOrder(order)
+	ord := mustNewOrder(t, order.SideBuy, "BTC-USD", 50000.0, 1.0)
+	ob.AddOrder(ord)
 
 	// Tenta cancelar
-	err := ob.CancelOrder(order.ID)
+	err := ob.CancelOrder(ord.ID)
 	if err != nil {
 		t.Errorf("unexpected error canceling order: %v", err)
 	}
 
 	// Verifica se a ordem foi cancelada
-	if order.Status != order.Cancelled {
-		t.Errorf("expected order status to be %v, got %v", order.Cancelled, order.Status)
+	if ord.Status != order.StatusCancelled {
+		t.Errorf("expected order status to be %v, got %v", order.StatusCancelled, ord.Status)
 	}
 
 	// Tenta cancelar ordem inexistente
@@ -137,20 +115,10 @@ func TestOrderBook_GetBestPrices(t *testing.T) {
 	}
 
 	// Adiciona ordens
-	buyOrder := order.NewOrder(
-		order.Buy,
-		"BTC-USD",
-		50000.0,
-		1.0,
-	)
+	buyOrder := mustNewOrder(t, order.SideBuy, "BTC-USD", 50000.0, 1.0)
 	ob.AddOrder(buyOrder)
 
-	sellOrder := order.NewOrder(
-		order.Sell,
-		"BTC-USD",
-		50100.0,
-		1.0,
-	)
+	sellOrder := mustNewOrder(t, order.SideSell, "BTC-USD", 50100.0, 1.0)
 	ob.AddOrder(sellOrder)
 
 	// Verifica melhor bid
